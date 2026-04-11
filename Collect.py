@@ -1,62 +1,44 @@
 import os, sys, pathlib
 def getReferences(mainFile):
-    out = []
-    ext = []
-    internal = []
     dir = [f.name for f in pathlib.Path(os.path.curdir).glob('*') if f.is_file()]
-    dir += [str(f) for f in pathlib.Path(os.path.curdir).glob('*/*') if f.is_file()]
-    #Get MainFile Libraries
-    for line in open(mainFile, 'r'):
-        line2 = line.replace("\n", "").replace(",", "").split(" ")
+    dir += [f.as_posix() for f in pathlib.Path(os.path.curdir).glob('*/*') if f.is_file()]
 
-        if line2[0] == "import":
-            for lib in line2[1:]:
-                out += lib,
-        if line2[0] == "from":
-            for lib in line2[3:]:
-                out += f"{line2[1]}.{lib}",
-    
-    #If Mainfile Libraries are local, get their libraries
-    """
-    for lib in out:
-        if "." in lib and f"{lib.split(".")[0]}.py" in dir:
-            for newLib in getReferences(open(f"{lib.split(".")[0]}.py", 'r')):
-                if not newLib in out:
-                    out += newLib, 
-        elif f"{lib}.py" in dir:
-            for newLib in getReferences(open(f"{lib.split(".")[0]}.py", 'r')):
-                if not newLib in out:
-                    out += newLib, 
-    """
-    for lib in out:
-        if "." in lib:
-            if f"{lib.split(".")[0]}.py" in dir:
-                if not lib in internal:
-                    internal += lib,
-                    for newLib in getReferences(f"{lib.split(".")[0]}.py")[1]:
-                            if not newLib in ext:
-                                ext += newLib,
-            elif f"{"\\".join(lib.split(".")[0:2])}.py" in dir:
-                if not f"{"\\".join(lib.split(".")[0:2])}.*" in internal:
-                    internal += f"{"\\".join(lib.split(".")[0:2])}.*",
-                    for newLib in getReferences(f"{"\\".join(lib.split(".")[0:2])}.py")[0]:
-                        if newLib not in internal:
-                            internal += newLib,
-                    for newLib in getReferences(f"{"\\".join(lib.split(".")[0:2])}.py")[1]:
-                        if newLib not in ext:
-                            ext += newLib,
+    internal = []
+    external = []
+    for line in open(mainFile, 'r'):
+        line = line.strip("\n")
+        if XnYDiff(line, ["from "]):
+            if line.split(" ")[1] == '.':
+                for x in line[14:].split(" ,"): #skip past len("from  import ")=13 + len(.) = 14
+                    internal += f"{x}.*",
+            elif line.split(" ")[1][0] == '.':
+                for x in line[13+len(f"{line.split(" ")[1][1:]}"):].split(" ,"): #skip past len("from  import ")=13 + len(.) = 14
+                    internal += f"{line.split(" ")[1][1:]}.*",
+            elif f"{line.split(" ")[1]}.py" in dir:
+                for x in line[len(f"{line.split(" ")[1]}")+13:].split(" ,"):
+                    internal += f"{f"{line.split(" ")[1]}"}.{x}",
+            elif f"{line.split(" ")[1]}/{line.split(" ")[3]}.py" in dir:
+                for x in line[len(f"{line.split(" ")[1]}")+13:].split(" ,"):
+                    internal += f"{line.split(" ")[1]}/{line.split(" ")[3]}.*",
+            elif f"{line.split(" ")[1].replace('.', '/')}.py" in dir:
+                for x in line[len(f"{line.split(" ")[1]}")+13:].split(" ,"):
+                    internal += f"{line.split(" ")[1].replace('.', '/')}.*",
             else:
-                if not f"{"\\".join(lib.split(".")[0:2])}.*" in ext:
-                    ext += lib,
-        elif f"{lib}.py" in dir:
-            if not lib in internal: 
-                internal += lib,
-                for newLib in getReferences(f"{lib}.py")[1]:
-                        if not newLib in ext:
-                            ext += newLib,
-        else: 
-            if lib not in ext: ext += lib,
-    return [internal, ext]
+                for x in line[len(f"{line.split(" ")[1]}")+13:].split(" ,"):
+                    external += f"{f"{line.split(" ")[1]}"}.{x}",
+        elif XnYDiff(line, ["import "]):
+            for x in line[7:].split(", "): #skip len("import ")=7
+                external += f"{x}",
+    
+    for ent in internal:
+        resp = getReferences(f"{ent.split(".")[0]}.py")
+        for ref in resp[0]:
+            if ref not in internal:
+                internal += ref,
+        for ref in resp[1]:
+            if ref not in external:
+                external += ref,
+    return [internal, external]
 def generateReferenceHeader(references):
     dir = os.listdir()
     header = ""
@@ -135,13 +117,17 @@ def retrieveClassesFromReferences(references):
     return out[1:]+"\n", indicies
 def retrieveConstantsFromReferences(references):
     out = ""
-    for ref in references:
+    references = references
+    for i in range(len(references)-1, 0, -1):
+        ref = references[i]
         for line in open(f"{ref.split(".")[0]}.py", 'r'):
             if not line in ["", " ", "\n"]:
                 if XnYDiff(line, ["def ", "class "]):
                     break
                 if not XnYDiff(line, ["from ", "import ", "\n"]):
                     out += line
+            if len(out) > 0 and out[-1] != "\n":
+                out += "\n"
     return out
 
 def getFuncFromCollect(col):
@@ -171,13 +157,23 @@ def getFuncFromCollect(col):
                     tempFVars2 += tempFVars[i],
             else:
                 tempFVars2 += tempFVars[i],
-        funcVars += tempFVars2,
+        if tempFVars2[0] != '':
+            funcVars += tempFVars2,
+        else:
+            funcVars += [],
 
     return [funcNames, funcVars]
 
 def externalRunPayload(classes, functions):
     log = "if __name__ == \"__main__\" and len(sys.argv) > 1:\n    os.chdir(sys.argv[1])\n"
     funcNames, funcVars = getFuncFromCollect(functions)
+
+    #Comment Functions
+    log += "    \"\"\"\n"
+    for i in range(0, len(funcNames)):
+        log += f"        {functions[i]}\n"
+    log += "    \"\"\"\n"
+
     for i in range(0,len(funcNames)):
         varString = ""
         #print(funcVars)
@@ -186,7 +182,7 @@ def externalRunPayload(classes, functions):
                 varString += f"int(sys.argv[{j}]), "
             elif "=" in funcVars[i][j-3] and str(funcVars[i][j-3].replace(" ","").split("=")[1]) in ["True", "False"]:
                 varString += f"bool(sys.argv[{j}]), "
-            else:
+            elif funcVars[i][j-3] != "":
                 varString += f"sys.argv[{j}], "
         log += f"    if sys.argv[2] == \"{funcNames[i]}\": {funcNames[i]}({varString[:-2]})\n"
     return log
@@ -196,6 +192,7 @@ def Collect(fileIN="main.py", fileOUT="collected.py"):
     
     #refHeader
     ref = getReferences(fileIN)
+
     newFile += generateReferenceHeader(ref[1])+"\n"
     #Get Constant variables
     #breakpoint()
@@ -203,10 +200,10 @@ def Collect(fileIN="main.py", fileOUT="collected.py"):
 
     #Make Reference File
     if "\\" in fileOUT:
-        open("\\".join(fileOUT.split("\\")[0:-1])+"references.txt", 'w').write("\n".join(ref[1]))
+        open("\\".join(fileOUT.split("\\")[0:-1])+"requirements.txt", 'w').write("\n".join(ref[1]))
     elif "/" in fileOUT:
-        open("/".join(fileOUT.split("/")[0:-1])+"references.txt", 'w').write("\n".join(ref[1]))
-    else: open("references.txt", 'w').write("\n".join(ref[1]))
+        open("/".join(fileOUT.split("/")[0:-1])+"requirements.txt", 'w').write("\n".join(ref[1]))
+    else: open("requirements.txt", 'w').write("\n".join(ref[1]))
 
     CollectedClasses = retrieveClassesFromReferences(ref[0]+["main.*"])
     CollectedFunctions = retrieveFunctionsFromReferences(ref[0]+["main.*"])
@@ -221,9 +218,11 @@ def Collect(fileIN="main.py", fileOUT="collected.py"):
 
     #WriteFile
     open(fileOUT, 'w').write(newFile)
-    return  CollectedFunctions[1]
+    return [CollectedClasses[1],CollectedFunctions[1]]
 
 #print(getBlock("main.py", ["class *"])[1])
+
+#print(getReferences("main.py"))
 
 if 1 and __name__ == "__main__":
     FIN = "main.py"
