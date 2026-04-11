@@ -1,5 +1,5 @@
 import os
-from .Collect import *
+from Collect import *
 from Tools import *
 
 class remote:
