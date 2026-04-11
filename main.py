@@ -1,6 +1,10 @@
 import Remote
 
 r = Remote.remote("tennant", "main.py", "/var/tmp/tmp.py")
-r.pushFile()
-r.run("/mnt/v1/thehrvea/Music/Store", "rTest", "Test123", "Test456")
+remoteDirectory = "/mnt/v1/thehrvea/Music/Store"
+if 0:
+  r.pushFile()
+  r.run(remoteDirectory, "listDir")
+if 1:
+  r.UI(remoteDirectory)
 r.delete()
